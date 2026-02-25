@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Language Learning</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div id="auth-panel">
+      <h3>Sign In</h3>
+      <input id="email" placeholder="Email">
+      <input id="password" type="password" placeholder="Password">
+      <button id="login-btn">Sign In</button>
+    </div>
+
+    <div id="user-panel" style="display:none;">
+      <div>Signed in as: <span id="user-email"></span></div>
+      <button id="signout-btn">Sign Out</button>
+      <hr>
+      <div>
+        <h3>Recorder</h3>
+        <button id="start-rec">Start Recording</button>
+        <button id="stop-rec">Stop Recording</button>
+      </div>
+      <hr>
+      <div>
+        <h3>Transcripts</h3>
+        <div id="transcripts"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:3000'; // Change to your backend
+    const firebaseConfig = {
+      apiKey: 'REPLACE_ME',
+      authDomain: 'REPLACE_ME',
+      projectId: 'REPLACE_ME',
+      storageBucket: 'REPLACE_ME',
+      messagingSenderId: 'REPLACE_ME',
+      appId: 'REPLACE_ME'
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const loginBtn = document.getElementById('login-btn');
+    const signoutBtn = document.getElementById('signout-btn');
+    const userEmail = document.getElementById('user-email');
+    const authPanel = document.getElementById('auth-panel');
+    const userPanel = document.getElementById('user-panel');
+
+    let idToken = null;
+    let mediaRecorder;
+    let audioChunks = [];
+
+    loginBtn.onclick = async () => {
+      try {
+        const cred = await auth.signInWithEmailAndPassword(emailInput.value, passwordInput.value);
+        idToken = await cred.user.getIdToken();
+      } catch (err) { alert(err.message); }
+    };
+
+    signoutBtn.onclick = async () => {
+      await auth.signOut();
+    };
+
+    auth.onAuthStateChanged(async user => {
+      if (user) {
+        userEmail.textContent = user.email;
+        idToken = await user.getIdToken();
+        authPanel.style.display = 'none';
+        userPanel.style.display = 'block';
+      } else {
+        idToken = null;
+        authPanel.style.display = 'block';
+        userPanel.style.display = 'none';
+      }
+    });
+
+    document.getElementById('start-rec').onclick = async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+      mediaRecorder.start();
+    };
+
+    document.getElementById('stop-rec').onclick = async () => {
+      mediaRecorder.stop();
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        const fd = new FormData();
+        fd.append('audio', blob, 'recording.webm');
+        const convRes = await fetch(`${API_BASE}/api/conversations`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ meta: 'from HTML client' })
+        });
+        const convData = await convRes.json();
+        const convId = convData.conversationId || convData.id;
+        const upRes = await fetch(`${API_BASE}/api/conversations/${convId}/audio`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${idToken}` },
+          body: fd
+        });
+        const upData = await upRes.json();
+        document.getElementById('transcripts').innerHTML += `<div>Uploaded: ${JSON.stringify(upData)}</div>`;
+      };
+    };
+  </script>
+</body>
+</html>
